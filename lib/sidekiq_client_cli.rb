@@ -5,7 +5,8 @@ require_relative 'sidekiq_client_cli/version'
 class SidekiqClientCLI
   COMMANDS = %w{push}
   DEFAULT_CONFIG_PATH = "config/initializers/sidekiq.rb"
-	DEFAULT_QUEUE = Sidekiq::Worker::ClassMethods::DEFAULT_OPTIONS['queue']
+  DEFAULT_QUEUE = Sidekiq::Worker::ClassMethods::DEFAULT_OPTIONS['queue']
+  DEFAULT_RETRY = Sidekiq::Worker::ClassMethods::DEFAULT_OPTIONS['retry']
 
   attr_accessor :settings
 
@@ -16,7 +17,8 @@ class SidekiqClientCLI
   def parse
     @settings = CLI.new do
       option :config_path, :short => :c, :default => DEFAULT_CONFIG_PATH, :description => "Sidekiq client config file path"
-			option :queue, :short => :q, :default => DEFAULT_QUEUE, :description => "Queue to place job on"
+      option :queue, :short => :q, :default => DEFAULT_QUEUE, :description => "Queue to place job on"
+      option :retry, :short => :r, :default => DEFAULT_RETRY, :cast => lambda { |r| SidekiqClientCLI.cast_retry_option(r) }, :description => "Retry option for job"
       argument :command, :description => "'push' to push a job to the queue"
       arguments :command_args, :required => false, :description => "command arguments"
     end.parse! do |settings|
@@ -26,6 +28,12 @@ class SidekiqClientCLI
         fail "No Worker Classes to push"
       end
     end
+  end
+
+  def self.cast_retry_option(retry_option)
+    return true if !!retry_option.match(/^(true|t|yes|y)$/i)
+    return false if !!retry_option.match(/^(false|f|no|n|0)$/i)
+    return retry_option.to_i if !!retry_option.match(/^\d+$/)
   end
 
   def run
@@ -38,12 +46,14 @@ class SidekiqClientCLI
   def push
     settings.command_args.each do |arg|
       begin
-        jid = Sidekiq::Client.push('class' => arg, 'queue' => settings.queue, 'args' => [])
-        p "Posted #{arg} to queue '#{settings.queue}', Job ID : #{jid}"
+        jid = Sidekiq::Client.push({ 'class' => arg,
+                                     'queue' => settings.queue,
+                                     'args'  => [],
+                                     'retry' => settings.retry })
+        p "Posted #{arg} to queue '#{settings.queue}', Job ID : #{jid}, Retry : #{settings.retry}"
       rescue StandardError => ex
         p "Failed to push to queue : #{ex.message}"
       end
     end
   end
 end
-
